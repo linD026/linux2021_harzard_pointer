@@ -146,8 +146,6 @@ void list_hp_retire(list_hp_t *hp, uintptr_t ptr)
         uintptr_t obj = rl->list[iret];
         bool can_delete = true;
         for (int itid = 0; itid < HP_MAX_THREADS && can_delete; itid++) {
-            if (itid == tid())
-                continue;
             for (int ihp = hp->max_hps - 1; ihp >= 0; ihp--) {
                 // if the thread's hp stored the ptr equal to obj
                 // cannot delete.

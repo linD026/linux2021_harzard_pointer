@@ -220,8 +220,6 @@ void list_hp_retire(list_hp_t *hp, uintptr_t ptr)
         return;
 
     for (int itid = 0; itid < HP_MAX_THREADS; itid++) {
-        if (itid == tid())
-            continue;
         for (int ihp = hp->max_hps - 1; ihp >= 0; ihp--) {
             rbtree_search_mark_delete(rl, &hp->hp[itid][ihp], cmp_search);
         }

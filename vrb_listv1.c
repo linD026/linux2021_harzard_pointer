@@ -164,8 +164,6 @@ void list_hp_retire(list_hp_t *hp, uintptr_t ptr)
     struct task_tree_root *new = malloc(sizeof(struct task_tree_root));
     RB_ROOT_INIT(*new);
     for (int itid = 0; itid < HP_MAX_THREADS; itid++) {
-        if (itid == tid())
-            continue;
         for (int ihp = hp->max_hps - 1; ihp >= 0; ihp--) {
             struct rbtree *tmp = rbtree_search(rl, &hp->hp[itid][ihp], cmp_search);
             if (tmp != NULL)
