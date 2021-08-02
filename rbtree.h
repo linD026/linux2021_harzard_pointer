@@ -214,7 +214,7 @@ static inline void rbtree_clean(struct task_tree_root *root,
 }
 
 /*
- * The return value must in RB_EQUAL, RB_LEFT, RB_RIGHT.
+ * The return value must in RB_EQUAL, RB_LEFT, RB_RIGHT, RB_EQUAL_BREAK.
  */
 #define rb_cmp_search_prototype(name, rbnode, data)                            \
     int name(struct rbtree *rbnode, void *data)
@@ -241,8 +241,9 @@ static inline struct rbtree *rbtree_search(struct task_tree_root *root,
                 goto out;
         }
     }
-out:
     return NULL;
+out:
+    return &root->nil;
 done:
     return temp;
 }
