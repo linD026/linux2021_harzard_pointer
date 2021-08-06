@@ -1,11 +1,43 @@
 #ifndef __RBTREE_H__
 #define __RBTREE_H__
 
+#include <assert.h>
+
+#ifdef __GNUC__
+
+struct rbtree {
+    unsigned long parent_color;
+    struct rbtree *leftC;
+    struct rbtree *rightC;
+} __attribute__((aligned(sizeof(long))));
+
+#elif __STDC_VERSION__ >= 201112L
+
+#include <stdalign.h>
+
+struct rbtree {
+    alignas(sizeof(long)) unsigned long parent_color;
+    struct rbtree *leftC;
+    struct rbtree *rightC;
+};
+
+#else
+
+static_assert(0, "Oops! Version is not support.");
+
+#endif
+
+struct task_tree_root {
+    struct rbtree *head;
+    struct rbtree nil;
+    size_t cnt;
+};
+
 #include <stddef.h>
 
 #define container_of(ptr, type, member)                                        \
-    ({                                                                         \
-        const typeof(((type *)0)->member) *__mptr = (ptr);                     \
+    __extension__({                                                            \
+        const __typeof__(((type *)0)->member) *__mptr = (ptr);                 \
         (type *)((char *)__mptr - offsetof(type, member));                     \
     })
 
@@ -16,18 +48,6 @@
 #define RB_EQUAL_BREAK -1
 #define RB_LEFT 1
 #define RB_RIGHT 2
-
-struct rbtree {
-    unsigned long parent_color;
-    struct rbtree *leftC;
-    struct rbtree *rightC;
-} __attribute__((aligned(sizeof(long))));
-
-struct task_tree_root {
-    struct rbtree *head;
-    struct rbtree nil;
-    size_t cnt;
-};
 
 #include <stdlib.h>
 
@@ -59,7 +79,6 @@ struct task_tree_root {
         (d)->parent_color &= __tmp.parent_color;                               \
     } while (0)
 
-
 #define RB_ROOT_INIT(root)                                                     \
     do {                                                                       \
         (root).head = &((root).nil);                                           \
@@ -79,7 +98,7 @@ struct task_tree_root {
  * 
  */
 static inline void task_tree_left_rotate(struct task_tree_root *root,
-                                                   struct rbtree *x)
+                                         struct rbtree *x)
 {
     struct rbtree *y = x->rightC;
     x->rightC = y->leftC;
@@ -97,7 +116,7 @@ static inline void task_tree_left_rotate(struct task_tree_root *root,
 }
 
 static inline void task_tree_right_rotate(struct task_tree_root *root,
-                                                    struct rbtree *y)
+                                          struct rbtree *y)
 {
     struct rbtree *x = y->leftC;
     y->leftC = x->rightC;
@@ -157,7 +176,7 @@ void task_insert_fixup(struct task_tree_root *root, struct rbtree *node)
 /*
  * if node1 < node 2 return true, otherwise return 0.
  */
-#define rb_cmp_insert_prototype(name, rbnode1, rbnode2)                            \
+#define rb_cmp_insert_prototype(name, rbnode1, rbnode2)                        \
     int name(struct rbtree *rbnode1, struct rbtree *rbnode2)
 
 static inline void rbtree_insert(struct task_tree_root *root,
@@ -183,7 +202,7 @@ static inline void rbtree_insert(struct task_tree_root *root,
         y->leftC = node;
     else
         y->rightC = node;
-    
+
     node->rightC = &root->nil;
     node->leftC = &root->nil;
     rb_set_red(node);
@@ -229,16 +248,16 @@ static inline struct rbtree *rbtree_search(struct task_tree_root *root,
     while (temp != &root->nil) {
         ret = cmp(temp, data);
         switch (ret) {
-            case RB_EQUAL:
-                goto done;
-            case RB_LEFT:
-                temp = temp->leftC;
-                break;
-            case RB_RIGHT:
-                temp = temp->rightC;
-                break;
-            case RB_EQUAL_BREAK:
-                goto out;
+        case RB_EQUAL:
+            goto done;
+        case RB_LEFT:
+            temp = temp->leftC;
+            break;
+        case RB_RIGHT:
+            temp = temp->rightC;
+            break;
+        case RB_EQUAL_BREAK:
+            goto out;
         }
     }
     return NULL;
@@ -364,8 +383,8 @@ void _rbtree_delete(struct task_tree_root *root, struct rbtree *node)
     void name(struct rbtree *rbnode)
 
 static inline int rbtree_delete(struct task_tree_root *root, void *data,
-                                 int (*cmp)(struct rbtree *, void *),
-                                 void (*deletefunc)(struct rbtree *))
+                                int (*cmp)(struct rbtree *, void *),
+                                void (*deletefunc)(struct rbtree *))
 {
     struct rbtree *z = rbtree_search(root, data, cmp);
     if (z == NULL)
