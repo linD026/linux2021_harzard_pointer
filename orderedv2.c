@@ -181,7 +181,7 @@ void list_hp_retire(list_hp_t *hp, uintptr_t ptr)
 
 static atomic_uint_fast32_t deletes = 0, inserts = 0;
 
-enum { HP_NEXT = 0, HP_CURR = 1, HP_PREV };
+enum { HP_NEXT = 0, HP_CURR = 1, HP_PREV, HP_START };
 
 #define is_marked(p) (bool)((uintptr_t)(p)&0x01)
 #define get_marked(p) ((uintptr_t)(p) | (0x01))
@@ -242,8 +242,6 @@ try_again:
     prev = start;
     curr = (list_node_t *)atomic_load(prev);
     (void)list_hp_protect_ptr(list->hp, HP_CURR, (uintptr_t)curr);
-    if (atomic_load(prev) != get_unmarked(curr))
-        goto try_again;
 
     while (true) {
         // get next
@@ -288,34 +286,12 @@ try_again:
             }
         }
 
-        if (!is_marked(curr))
+        curr = (list_node_t *)atomic_load(prev);
+        (void)list_hp_protect_release(list->hp, HP_CURR, get_unmarked(curr));
+        if (atomic_load(prev) != get_unmarked(curr))
             goto try_again;
+
     } /*while (true)*/    
-}
-
-
-bool list_insert(list_t *list, list_key_t key)
-{
-    list_node_t *curr = NULL, *next = NULL;
-    atomic_uintptr_t *prev = NULL;
-
-    list_node_t *node = list_node_new(key);
-
-    while (true) {
-        if (__list_find_ordered(list, &key, &list->head, &prev, &curr, &next)) {
-            list_node_destroy(node);
-            list_hp_clear(list->hp);
-            return false;
-        }
-        
-        atomic_store_explicit(&node->next, (uintptr_t)curr,
-                              memory_order_relaxed);
-        uintptr_t tmp = get_unmarked(curr);
-        if (atomic_compare_exchange_strong(prev, &tmp, (uintptr_t)node)) {
-            list_hp_clear(list->hp);
-            return true;
-        }
-    }
 }
 
 bool list_insert_conti(list_t *list, list_key_t key)
@@ -344,14 +320,14 @@ try_again:
         if (is_marked(atomic_load(prev))) {
             goto try_again;
         }
-        (void)list_hp_protect_release(list->hp, HP_PREV, get_unmarked(atomic_load(prev)));
+
+        (void)list_hp_protect_release(list->hp, HP_START, get_unmarked(atomic_load(prev)));
         if (__list_find_ordered(list, &key, prev, &prev, &curr, &next)) {
             list_node_destroy(node);
             list_hp_clear(list->hp);
             return false;
         }
-
-    }
+    } /* while(true) */
 }
 
 /*
@@ -359,56 +335,39 @@ try_again:
  * node->next => curr => next
  *       prev
  */
-bool list_delete(list_t *list, list_key_t key)
-{
-    list_node_t *curr, *next;
-    atomic_uintptr_t *prev;
-    while (true) {
-        if (!__list_find_ordered(list, &key, &list->head, &prev, &curr, &next)) {
-            list_hp_clear(list->hp);
-            return false;
-        }
-
-        // marked delete
-        uintptr_t tmp = get_unmarked(next);
-        if (!atomic_compare_exchange_strong(&curr->next, &tmp,
-                                            get_marked(next)))
-            continue;
-
-        tmp = get_unmarked(curr);
-        if (atomic_compare_exchange_strong(prev, &tmp, get_unmarked(next))) {
-            list_hp_clear(list->hp);
-            // DDD;
-            list_hp_retire(list->hp, get_unmarked(curr));
-        } else {
-            list_hp_clear(list->hp);
-        }
-        return true;
-    }
-}
 
 bool list_delete_once(list_t *list, list_key_t key)
 {
     list_node_t *curr, *next;
     atomic_uintptr_t *prev;
+try_again:    
     if (!__list_find_ordered(list, &key, &list->head, &prev, &curr, &next)) {
         list_hp_clear(list->hp);
-        return true;
+        return false;
     }
+    do {
+        // already marked
+        uintptr_t tmp = atomic_fetch_or(&curr->next, 0x01);
+        if (is_marked(tmp))
+            return true;
 
-    uintptr_t tmp = get_unmarked(next);
-    // if (!atomic_compare_exchange_strong(&curr->next, &tmp,
-    //                                    get_marked(next)))
-    //    return false;
+        tmp = get_unmarked(curr);
+        if (atomic_compare_exchange_strong(prev, &tmp, get_unmarked(next))) {
+            list_hp_clear(list->hp);
+            list_hp_retire(list->hp, get_unmarked(curr));
+            return true;
+        } 
 
-    tmp = get_unmarked(curr);
-    if (atomic_compare_exchange_strong(prev, &tmp, get_unmarked(next))) {
-        list_hp_clear(list->hp);
-        list_hp_retire(list->hp, get_unmarked(curr));
-    } else {
-        list_hp_clear(list->hp);
-    }
-    return true;
+        if (is_marked(atomic_load(prev))) {
+            list_hp_clear(list->hp);
+            goto try_again;            
+        }
+        (void)list_hp_protect_release(list->hp, HP_START, get_unmarked(atomic_load(prev)));
+        if (!__list_find_ordered(list, &key, prev, &prev, &curr, &next)) {
+            list_hp_clear(list->hp);
+            return false;
+        }
+    } while (true);
 }
 
 
@@ -418,7 +377,7 @@ list_t *list_new(void)
     assert(list);
     list_node_t *head = list_node_new(0), *tail = list_node_new(UINTPTR_MAX);
     assert(head), assert(tail);
-    list_hp_t *hp = list_hp_new(3, __list_node_delete);
+    list_hp_t *hp = list_hp_new(4, __list_node_delete);
 
     atomic_init(&head->next, (uintptr_t)tail);
     *list = (list_t){ .hp = hp };
@@ -499,7 +458,7 @@ static inline int test(void)
 
     for (size_t i = 0; i < N_ELEMENTS; i++) {
         for (size_t j = 0; j < tid_v_base; j++)
-            list_delete(list, (uintptr_t)&elements[j][i]);
+            list_delete_once(list, (uintptr_t)&elements[j][i]);
     }
 
     list_destroy(list);
