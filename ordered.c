@@ -14,6 +14,93 @@
 #include <string.h>
 #include <threads.h>
 
+#ifdef ANALYSIS_OPS
+
+/*
+ * rtry - goto try_again
+ * con  - wait free contain
+ * trav - traversal all the node
+ * fail - CAS failed
+ * del  - list_delete failed
+ * ins  - list_insert failed
+ */
+static atomic_uint_fast64_t rtry = 0, cons = 0, trav = 0, fail = 0;
+static atomic_uint_fast64_t del = 0, ins = 0;
+static atomic_uint_fast64_t deletes = 0, inserts = 0;
+
+#define goto_try_again                                                         \
+    do {                                                                       \
+        atomic_fetch_add(&rtry, 1);                                            \
+        goto try_again;                                                        \
+    } while (0)
+#define cons_inc                                                                \
+    do {                                                                       \
+        atomic_fetch_add(&cons, 1);                                            \
+    } while (0)
+#define trav_inc                                                               \
+    do {                                                                       \
+        atomic_fetch_add(&trav, 1);                                            \
+    } while (0)
+#define CAS(obj, expected, desired)                                            \
+    ({                                                                         \
+        atomic_fetch_add(&fail, 1);                                            \
+        atomic_compare_exchange_strong(obj, expected, desired);                 \
+    })
+#define del_inc                                                                \
+    do {                                                                       \
+        atomic_fetch_add(&del, 1);                                             \
+    } while (0)
+#define ins_inc                                                                \
+    do {                                                                       \
+        atomic_fetch_add(&ins, 1);                                             \
+    } while (0)
+#define deletes_inc                                                                \
+    do {                                                                       \
+        atomic_fetch_add(&deletes, 1);                                            \
+    } while (0)
+#define inserts_inc                                                               \
+    do {                                                                       \
+        atomic_fetch_add(&inserts, 1);                                            \
+    } while (0)
+
+void analysis_func(void)
+{
+    printf("%10s %10s %10s %10s %10s %10s %10s %10s\n", "rtry", "cons", "trav", "fail", "del", "ins", "deletes", "inserts");
+    for (int i = 0; i < 87; i++)
+        printf("-");
+    printf("\n%10ld %10ld %10ld %10ld %10ld %10ld %10ld %10ld\n", rtry, cons, trav, fail, del, ins, deletes, inserts);
+}
+
+#else
+
+#define goto_try_again                                                         \
+    do {                                                                       \
+        goto try_again;                                                        \
+    } while (0)
+#define cons_inc                                                                \
+    do {                                                                       \
+    } while (0)
+#define trav_inc                                                               \
+    do {                                                                       \
+    } while (0)
+#define CAS(obj, expected, desired)                                            \
+    ({ atomic_compare_exchange_strong(obj, expected, desired); })
+#define del_inc                                                                \
+    do {                                                                       \
+    } while (0)
+#define ins_inc                                                                \
+    do {                                                                       \
+    } while (0)
+#define deletes_inc                                                                \
+    do {                                                                       \
+    } while (0)
+#define inserts_inc                                                               \
+    do {                                                                       \
+    } while (0)
+
+#endif
+
+
 #define HP_MAX_THREADS 128
 #define HP_MAX_HPS 5 /* This is named 'K' in the HP paper */
 #define CLPAD (128 / sizeof(uintptr_t)) /* 128 / 8 = 16 */
@@ -176,10 +263,8 @@ void list_hp_retire(list_hp_t *hp, uintptr_t ptr)
 #include <pthread.h>
 
 #define N_ELEMENTS 128
-#define N_THREADS (32 /*NNN*/)
+#define N_THREADS (64 /*NNN*/)
 #define MAX_THREADS 128
-
-static atomic_uint_fast32_t deletes = 0, inserts = 0;
 
 enum { HP_NEXT = 0, HP_CURR = 1, HP_PREV };
 
@@ -212,7 +297,7 @@ list_node_t *list_node_new(list_key_t key)
     list_node_t *node = aligned_alloc(128, sizeof(*node));
     assert(node);
     *node = (list_node_t){ .magic = LIST_MAGIC, .key = key };
-    (void)atomic_fetch_add(&inserts, 1);
+    inserts_inc;
     return node;
 }
 
@@ -222,75 +307,13 @@ void list_node_destroy(list_node_t *node)
         return;
     assert(node->magic == LIST_MAGIC);
     free(node);
-    (void)atomic_fetch_add(&deletes, 1);
+    deletes_inc;
 }
 
 static void __list_node_delete(void *arg)
 {
     list_node_t *node = (list_node_t *)arg;
     list_node_destroy(node);
-}
-
-/*
- * When curr mark delete, curr->next marked. 
- * unordered version
- */
-static bool __list_find(list_t *list, list_key_t *key,
-                        atomic_uintptr_t **par_prev, list_node_t **par_curr,
-                        list_node_t **par_next)
-{
-    atomic_uintptr_t *prev = NULL;
-    list_node_t *curr = NULL, *next = NULL;
-
-try_again:
-    prev = &list->head;
-    curr = (list_node_t *)atomic_load(prev);
-    (void)list_hp_protect_ptr(list->hp, HP_CURR, (uintptr_t)curr);
-    if (atomic_load(prev) != get_unmarked(curr))
-        goto try_again;
-
-    while (true) {
-        if (!get_unmarked_node(curr))
-            return false;
-
-        next = (list_node_t *)atomic_load(&get_unmarked_node(curr)->next);
-        (void)list_hp_protect_ptr(list->hp, HP_NEXT, get_unmarked(next));
-        
-        if (atomic_load(&get_unmarked_node(curr)->next) != get_unmarked(next)) {
-            break;
-        }
-            
-        if (get_unmarked(next) == atomic_load((atomic_uintptr_t *)&list->tail))
-            break;
-
-        if (atomic_load(prev) != get_unmarked(curr))
-            goto try_again;
-
-        if (get_unmarked_node(next) == next) {
-            if (!(get_unmarked_node(curr)->key < *key)) {
-                *par_curr = curr;
-                *par_prev = prev;
-                *par_next = next;
-                return get_unmarked_node(curr)->key == *key;
-            }
-
-            prev = &get_unmarked_node(curr)->next;
-            (void)list_hp_protect_release(list->hp, HP_PREV,
-                                          get_unmarked(curr));
-        } else {
-            uintptr_t tmp = get_unmarked(curr);
-            if (!atomic_compare_exchange_strong(prev, &tmp, get_unmarked(next)))
-                goto try_again;
-            list_hp_retire(list->hp, get_unmarked(curr));
-        }
-        (void)list_hp_protect_release(list->hp, HP_CURR, get_unmarked(next));
-        curr = next;
-    }
-    *par_curr = curr;
-    *par_prev = prev;
-    *par_next = next;
-
-    return false;
 }
 
 static bool __list_find_ordered(list_t *list, list_key_t *key,
@@ -307,7 +330,7 @@ try_again:
         curr = (list_node_t *)atomic_load(prev);
         (void)list_hp_protect_ptr(list->hp, HP_CURR, (uintptr_t)curr);
         if (atomic_load(prev) != get_unmarked(curr))
-            goto try_again;
+            goto_try_again;
 
         // get next
         next = (list_node_t *)atomic_load(&get_unmarked_node(curr)->next);
@@ -315,11 +338,16 @@ try_again:
         
         // find left_node(prev) and right_node (curr)
         do {
+            trav_inc;
             if (!is_marked(next)) {
                 (void)list_hp_protect_release(list->hp, HP_PREV,
                                           get_unmarked(curr));
                 prev = &get_unmarked_node(curr)->next;
             }
+#ifdef ANALYSIS_OPS            
+            else
+                cons_inc;
+#endif
             (void)list_hp_protect_release(list->hp, HP_CURR, get_unmarked(next));
             curr = get_unmarked_node(next);
             if (get_unmarked(curr) == atomic_load((atomic_uintptr_t *)&list->tail))
@@ -332,7 +360,7 @@ try_again:
 
         if (atomic_load(prev) == get_unmarked(curr)) {
             if (get_unmarked(curr) != atomic_load((atomic_uintptr_t *)&list->tail) && is_marked(get_unmarked_node(curr)->next))
-                goto try_again;
+                goto_try_again;
             else {
                 *par_curr = curr;
                 *par_prev = prev;
@@ -341,9 +369,9 @@ try_again:
             }
         }
         uintptr_t tmp = get_unmarked(curr);
-        if (atomic_compare_exchange_strong(prev, &tmp, get_unmarked(curr))) {
+        if (CAS(prev, &tmp, get_unmarked(curr))) {
             if (get_unmarked(curr) != atomic_load((atomic_uintptr_t *)&list->tail) && is_marked(get_unmarked_node(curr)->next)) {
-                goto try_again;
+                goto_try_again;
             }
             else {
                 *par_curr = curr;
@@ -373,10 +401,11 @@ bool list_insert(list_t *list, list_key_t key)
         atomic_store_explicit(&node->next, (uintptr_t)curr,
                               memory_order_relaxed);
         uintptr_t tmp = get_unmarked(curr);
-        if (atomic_compare_exchange_strong(prev, &tmp, (uintptr_t)node)) {
+        if (CAS(prev, &tmp, (uintptr_t)node)) {
             list_hp_clear(list->hp);
             return true;
         }
+        ins_inc;
     }
 }
 
@@ -397,12 +426,13 @@ bool list_delete(list_t *list, list_key_t key)
 
         // marke delete
         uintptr_t tmp = get_unmarked(next);
-        if (!atomic_compare_exchange_strong(&curr->next, &tmp,
-                                            get_marked(next)))
+        if (!CAS(&curr->next, &tmp, get_marked(next))) {
+            del_inc;
             continue;
+        }
 
         tmp = get_unmarked(curr);
-        if (atomic_compare_exchange_strong(prev, &tmp, get_unmarked(next))) {
+        if (CAS(prev, &tmp, get_unmarked(next))) {
             list_hp_clear(list->hp);
             // DDD;
             list_hp_retire(list->hp, get_unmarked(curr));
@@ -511,7 +541,15 @@ static inline int test(void)
 int main(void)
 {
     // time_check(test());
+#ifdef ANALYSIS_OPS
+    int times = 10;
+    for (int i = 0;i < times;i++) {
+        test();
+        tid_v_base = 0;
+    }
+    analysis_func();
+#else
     test();
-    
+#endif
     return 0;
 }
