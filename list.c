@@ -42,10 +42,12 @@ static atomic_uint_fast64_t deletes = 0, inserts = 0;
     do {                                                                       \
         atomic_fetch_add(&trav, 1);                                            \
     } while (0)
-#define CAS(obj, expected, desired)                                            \
-    ({                                                                         \
-        atomic_fetch_add(&fail, 1);                                            \
-        atomic_compare_exchange_strong(obj, expected, desired);                \
+#define CAS(obj, expected, desired)                                          \
+    ({                                                                       \
+        bool __ret = atomic_compare_exchange_strong(obj, expected, desired); \
+        if (!__ret)                                                          \
+            atomic_fetch_add(&fail, 1);                                      \
+        __ret;                                                               \
     })
 #define del_inc                                                                \
     do {                                                                       \

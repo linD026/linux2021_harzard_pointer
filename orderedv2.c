@@ -15,14 +15,14 @@
 #include <threads.h>
 
 #ifdef ANALYSIS_OPS
-
 /*
- * rtry - goto try_again
- * con  - wait free contain
- * trav - traversal all the node
- * fail - CAS failed
- * del  - list_delete failed
- * ins  - list_insert failed
+ * "rtry" the number of retries in the __list_find function.
+ * "cons" the number of wait-free contains in the __list_find function that curr
+ * pointer pointed.
+ * "trav" the number of list element traversal in the __list_find function.
+ * "fail" the number of CAS() failures.
+ * "del" the number of list_delete operation failed and restart again.
+ * "ins" the number of list_insert operation failed and restart again.
  */
 static atomic_uint_fast64_t rtry = 0, cons = 0, trav = 0, fail = 0;
 static atomic_uint_fast64_t del = 0, ins = 0;
@@ -41,10 +41,12 @@ static atomic_uint_fast64_t deletes = 0, inserts = 0;
     do {                                                                       \
         atomic_fetch_add(&trav, 1);                                            \
     } while (0)
-#define CAS(obj, expected, desired)                                            \
-    ({                                                                         \
-        atomic_fetch_add(&fail, 1);                                            \
-        atomic_compare_exchange_strong(obj, expected, desired);                \
+#define CAS(obj, expected, desired)                                          \
+    ({                                                                       \
+        bool __ret = atomic_compare_exchange_strong(obj, expected, desired); \
+        if (!__ret)                                                          \
+            atomic_fetch_add(&fail, 1);                                      \
+        __ret;                                                               \
     })
 #define del_inc                                                                \
     do {                                                                       \
