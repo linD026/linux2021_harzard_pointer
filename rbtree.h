@@ -90,12 +90,13 @@ struct rbtree *task_tree_max(struct task_tree_root *root, struct rbtree *x);
 
 #define rbtree_next(r, n)                                                      \
     ({                                                                         \
-        struct rbtree *__tmp, *__n;                                            \
-        if (n->rightC != NULL)                                                 \
-            __tmp = task_tree_min(r, n->rightC);                               \
+        struct task_tree_root *__r = r;                                        \
+        struct rbtree *__tmp, *__n = n;                                        \
+        if (__n->rightC != NULL)                                               \
+            __tmp = task_tree_min(r, __n->rightC);                             \
         else {                                                                 \
             __tmp = rb_parent(n);                                              \
-            while (__tmp != r->nil && n == __tmp->rightC) {                    \
+            while (__tmp != &__r->nil && __n == __tmp->rightC) {               \
                 __n = __tmp;                                                   \
                 __tmp = rb_parent(__tmp);                                      \
             }                                                                  \
@@ -105,12 +106,13 @@ struct rbtree *task_tree_max(struct task_tree_root *root, struct rbtree *x);
 
 #define rbtree_prev(r, n)                                                      \
     ({                                                                         \
-        struct rbtree *__tmp, __n;                                             \
-        if (n->leftC != NULL)                                                  \
-            __tmp = task_tree_max(r, n->leftC);                                \
+        struct task_tree_root *__r = r;                                        \
+        struct rbtree *__tmp, *__n = n;                                        \
+        if (__n->leftC != NULL)                                                \
+            __tmp = task_tree_max(r, __n->leftC);                              \
         else {                                                                 \
             __tmp = rb_parent(n);                                              \
-            while (__tmp != r->nil && n == __tmp->leftC) {                     \
+            while (__tmp != &__r->nil && __n == __tmp->leftC) {                \
                 __n = __tmp;                                                   \
                 __tmp = rb_parent(__tmp);                                      \
             }                                                                  \
@@ -119,7 +121,7 @@ struct rbtree *task_tree_max(struct task_tree_root *root, struct rbtree *x);
     })
 
 /*
- * if node1 < node 2 return true, otherwise return 0.
+ * if node1 < node 2 return 1, otherwise return 0.
  */
 #define rb_cmp_insert_prototype(name, rbnode1, rbnode2)                        \
     int name(struct rbtree *rbnode1, struct rbtree *rbnode2)
