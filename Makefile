@@ -12,4 +12,5 @@ cnt:
 ord:
 	gcc $(CFLAG) -Wall -o ordered ordered.c -lpthread -g
 
-
+rbtree:
+	gcc -Wall -o rbtree vrb_listv1.c rbtree.c -lpthread -g

@@ -1,16 +1,17 @@
 YES="Y"
+yes="y"
 
-read -p "analysis [Y/N] " ANAL
-read -p "perf     [Y/N] " PERF
+read -p "analyze [Y/N] " ANAL
+read -p "perf    [Y/N] " PERF
 
-if [ $ANAL == $YES ]
+if [ $ANAL == $YES ] || [ $ANAL == $yes ]
 then
     CFLAG='-D ANALYSIS_OPS'
 else
     CFLAG=''
 fi
 
-if [ $PERF == $YES ]
+if [ $PERF == $YES ]  || [ $PERF == $yes ]
 then 
     PERF_COM='sudo perf stat --repeat 1000 -e cache-misses,cache-references,instructions,cycles'
 else

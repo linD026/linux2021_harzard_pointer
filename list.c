@@ -577,7 +577,7 @@ int main(void)
 {
     // time_check(test());
 #ifdef ANALYSIS_OPS
-    int times = 10;
+    int times = 20;
     for (int i = 0;i < times;i++) {
         test();
         tid_v_base = 0;
